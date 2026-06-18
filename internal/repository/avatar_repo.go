@@ -78,3 +78,11 @@ func (r *AvatarRepository) SoftDelete(ctx context.Context, id, userID string) er
 	}
 	return nil
 }
+func (r *AvatarRepository) UpdateThumbnails(ctx context.Context, avatarID string, thumbnails map[string]string) error {
+	query := `UPDATE avatars SET thumbnail_s3_keys = $1, processing_status = 'completed', updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Pool().Exec(ctx, query, thumbnails, avatarID)
+	if err != nil {
+		return fmt.Errorf("failed to update thumbnails: %w", err)
+	}
+	return nil
+}
