@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -63,4 +64,37 @@ func (h *AvatarHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(avatar)
+}
+
+// GET /api/v1/avatars/{id}
+func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Достаем ID из URL: /api/v1/avatars/{id}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, `{"error":"avatar id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Вызываем бизнес-логику
+	avatar, data, err := h.service.Get(r.Context(), id)
+	if err != nil {
+		if err.Error() == "avatar not found" {
+			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Отдаем файл с правильным Content-Type
+	w.Header().Set("Content-Type", avatar.MimeType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", avatar.FileName))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
 }

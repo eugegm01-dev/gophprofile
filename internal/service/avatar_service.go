@@ -71,3 +71,18 @@ func (s *AvatarService) Upload(ctx context.Context, userID, fileName, mimeType s
 
 	return avatar, nil
 }
+func (s *AvatarService) Get(ctx context.Context, id string) (*model.Avatar, []byte, error) {
+	// 1. Получаем метаданные из БД
+	avatar, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get avatar metadata: %w", err)
+	}
+
+	// 2. Скачиваем файл из S3
+	data, err := s.s3Client.Download(ctx, avatar.S3Key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to download from s3: %w", err)
+	}
+
+	return avatar, data, nil
+}

@@ -40,3 +40,30 @@ func (r *AvatarRepository) UpdateProcessingStatus(ctx context.Context, avatarID,
 	}
 	return nil
 }
+
+func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*model.Avatar, error) {
+	query := `
+		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key, 
+		       upload_status, processing_status, created_at
+		FROM avatars
+		WHERE id = $1 AND deleted_at IS NULL`
+
+	avatar := &model.Avatar{}
+	err := r.db.Pool().QueryRow(ctx, query, id).Scan(
+		&avatar.ID, &avatar.UserID, &avatar.FileName, &avatar.MimeType,
+		&avatar.SizeBytes, &avatar.S3Key, &avatar.UploadStatus,
+		&avatar.ProcessingStatus, &avatar.CreatedAt,
+	)
+
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, fmt.Errorf("avatar not found")
+		}
+		return nil, fmt.Errorf("failed to get avatar: %w", err)
+	}
+
+	// Формируем URL для API
+	avatar.URL = fmt.Sprintf("/api/v1/avatars/%s", avatar.ID)
+
+	return avatar, nil
+}

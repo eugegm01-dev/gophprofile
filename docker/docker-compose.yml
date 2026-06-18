@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: gophprofile-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: gopher
       POSTGRES_PASSWORD: gopher123
@@ -19,6 +20,7 @@ services:
   minio:
     image: minio/minio:latest
     container_name: gophprofile-minio
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -37,6 +39,7 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: gophprofile-rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: gopher
       RABBITMQ_DEFAULT_PASS: gopher123

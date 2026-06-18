@@ -50,7 +50,8 @@ func main() {
 		w.Write([]byte(`{"status": "ok", "service": "gophprofile"}`))
 	})
 
-	mux.HandleFunc("/api/v1/avatars", avatarHandler.Upload)
+	mux.HandleFunc("POST /api/v1/avatars", avatarHandler.Upload)
+	mux.HandleFunc("GET /api/v1/avatars/{id}", avatarHandler.Get)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("🚀 Server starting on %s", addr)

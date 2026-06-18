@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 
+	"github.com/gubaevem/gophprofile/internal/config"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/gubaevem/gophprofile/internal/config"
 )
 
 type Client struct {
@@ -26,7 +27,7 @@ func NewClient(cfg *config.S3Config) (*Client, error) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Проверяем, существует ли бакет, и создаём его если нет
 	exists, err := client.BucketExists(ctx, cfg.Bucket)
 	if err != nil {
@@ -56,4 +57,19 @@ func (c *Client) Upload(ctx context.Context, key string, data []byte, contentTyp
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) Download(ctx context.Context, key string) ([]byte, error) {
+	obj, err := c.minio.GetObject(ctx, c.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get object: %w", err)
+	}
+	defer obj.Close()
+
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read object: %w", err)
+	}
+
+	return data, nil
 }
