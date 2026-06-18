@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/gubaevem/gophprofile/internal/model"
@@ -40,19 +41,20 @@ func (r *AvatarRepository) UpdateProcessingStatus(ctx context.Context, avatarID,
 	}
 	return nil
 }
-
 func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*model.Avatar, error) {
 	query := `
 		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key, 
-		       upload_status, processing_status, created_at
+		       upload_status, processing_status, thumbnail_s3_keys, created_at
 		FROM avatars
 		WHERE id = $1 AND deleted_at IS NULL`
 
 	avatar := &model.Avatar{}
+	var thumbnailKeys []byte // JSONB приходит как []byte
+
 	err := r.db.Pool().QueryRow(ctx, query, id).Scan(
 		&avatar.ID, &avatar.UserID, &avatar.FileName, &avatar.MimeType,
 		&avatar.SizeBytes, &avatar.S3Key, &avatar.UploadStatus,
-		&avatar.ProcessingStatus, &avatar.CreatedAt,
+		&avatar.ProcessingStatus, &thumbnailKeys, &avatar.CreatedAt,
 	)
 
 	if err != nil {
@@ -62,9 +64,14 @@ func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*model.Avata
 		return nil, fmt.Errorf("failed to get avatar: %w", err)
 	}
 
-	// Формируем URL для API
-	avatar.URL = fmt.Sprintf("/api/v1/avatars/%s", avatar.ID)
+	// Парсим JSONB в map
+	if len(thumbnailKeys) > 0 {
+		if err := json.Unmarshal(thumbnailKeys, &avatar.ThumbnailS3Keys); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal thumbnails: %w", err)
+		}
+	}
 
+	avatar.URL = fmt.Sprintf("/api/v1/avatars/%s", avatar.ID)
 	return avatar, nil
 }
 func (r *AvatarRepository) SoftDelete(ctx context.Context, id, userID string) error {

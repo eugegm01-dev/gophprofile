@@ -120,3 +120,30 @@ func (s *AvatarService) Delete(ctx context.Context, id, userID string) error {
 
 	return nil
 }
+func (s *AvatarService) GetWithSize(ctx context.Context, id, size string) (*model.Avatar, []byte, error) {
+	// 1. Получаем метаданные из БД
+	avatar, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get avatar metadata: %w", err)
+	}
+
+	// 2. Определяем, какой файл скачивать
+	s3Key := avatar.S3Key // по умолчанию оригинал
+
+	if size != "" && size != "original" {
+		// Проверяем, есть ли миниатюра нужного размера
+		if thumbKey, ok := avatar.ThumbnailS3Keys[size]; ok {
+			s3Key = thumbKey
+		} else {
+			return nil, nil, fmt.Errorf("thumbnail size %s not available", size)
+		}
+	}
+
+	// 3. Скачиваем файл из S3
+	data, err := s.s3Client.Download(ctx, s3Key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to download from s3: %w", err)
+	}
+
+	return avatar, data, nil
+}

@@ -74,25 +74,30 @@ func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Достаем ID из URL: /api/v1/avatars/{id}
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, `{"error":"avatar id is required"}`, http.StatusBadRequest)
 		return
 	}
 
+	// Читаем query-параметр size
+	size := r.URL.Query().Get("size")
+
 	// Вызываем бизнес-логику
-	avatar, data, err := h.service.Get(r.Context(), id)
+	avatar, data, err := h.service.GetWithSize(r.Context(), id, size)
 	if err != nil {
 		if strings.Contains(err.Error(), "avatar not found") {
 			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
+			return
+		}
+		if strings.Contains(err.Error(), "not available") {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
 			return
 		}
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// Отдаем файл с правильным Content-Type
 	w.Header().Set("Content-Type", avatar.MimeType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", avatar.FileName))
