@@ -38,8 +38,9 @@ type S3Config struct {
 }
 
 type RabbitMQConfig struct {
-	URL   string
-	Queue string
+	URL         string
+	Queue       string
+	QueueDelete string
 }
 
 func Load() *Config {
@@ -66,8 +67,9 @@ func Load() *Config {
 			UseSSL:    getEnvAsBool("S3_USE_SSL", false),
 		},
 		RabbitMQ: RabbitMQConfig{
-			URL:   getEnv("RABBITMQ_URL", "amqp://gopher:gopher123@localhost:5672/"),
-			Queue: getEnv("RABBITMQ_QUEUE", "avatar_processing"),
+			URL:         getEnv("RABBITMQ_URL", "amqp://gopher:gopher123@localhost:5672/"),
+			Queue:       getEnv("RABBITMQ_QUEUE", "avatar_processing"),
+			QueueDelete: getEnv("RABBITMQ_QUEUE_DELETE", "avatar_deletion"),
 		},
 	}
 }

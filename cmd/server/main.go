@@ -29,16 +29,24 @@ func main() {
 	}
 
 	// Подключаем RabbitMQ
+	// Подключаем RabbitMQ (для загрузок)
 	mqPublisher, err := rabbitmq.NewPublisher(cfg.RabbitMQ.URL, cfg.RabbitMQ.Queue)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer mqPublisher.Close()
 
+	// Подключаем RabbitMQ (для удалений)
+	mqDeletePublisher, err := rabbitmq.NewPublisher(cfg.RabbitMQ.URL, cfg.RabbitMQ.QueueDelete)
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ (delete): %v", err)
+	}
+	defer mqDeletePublisher.Close()
+
 	// 2. Инициализация слоев (Dependency Injection)
 	avatarRepo := repository.NewAvatarRepository(db)
 	// Передаем mqPublisher в сервис
-	avatarService := service.NewAvatarService(avatarRepo, s3Client, mqPublisher)
+	avatarService := service.NewAvatarService(avatarRepo, s3Client, mqPublisher, mqDeletePublisher)
 	avatarHandler := server.NewAvatarHandler(avatarService)
 
 	// 3. Роутер
@@ -52,6 +60,7 @@ func main() {
 
 	mux.HandleFunc("POST /api/v1/avatars", avatarHandler.Upload)
 	mux.HandleFunc("GET /api/v1/avatars/{id}", avatarHandler.Get)
+	mux.HandleFunc("DELETE /api/v1/avatars/{id}", avatarHandler.Delete)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("🚀 Server starting on %s", addr)

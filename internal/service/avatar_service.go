@@ -19,14 +19,25 @@ type AvatarUploadEvent struct {
 	S3Key    string `json:"s3_key"`
 }
 
-type AvatarService struct {
-	repo      *repository.AvatarRepository
-	s3Client  *pkgs3.Client
-	publisher *rabbitmq.Publisher // Добавили
+type AvatarDeleteEvent struct {
+	AvatarID string `json:"avatar_id"`
+	S3Key    string `json:"s3_key"`
 }
 
-func NewAvatarService(repo *repository.AvatarRepository, s3 *pkgs3.Client, pub *rabbitmq.Publisher) *AvatarService {
-	return &AvatarService{repo: repo, s3Client: s3, publisher: pub}
+type AvatarService struct {
+	repo            *repository.AvatarRepository
+	s3Client        *pkgs3.Client
+	publisher       *rabbitmq.Publisher
+	deletePublisher *rabbitmq.Publisher // Добавили
+}
+
+func NewAvatarService(repo *repository.AvatarRepository, s3 *pkgs3.Client, pub *rabbitmq.Publisher, deletePub *rabbitmq.Publisher) *AvatarService {
+	return &AvatarService{
+		repo:            repo,
+		s3Client:        s3,
+		publisher:       pub,
+		deletePublisher: deletePub,
+	}
 }
 
 func (s *AvatarService) Upload(ctx context.Context, userID, fileName, mimeType string, data []byte) (*model.Avatar, error) {
@@ -85,4 +96,27 @@ func (s *AvatarService) Get(ctx context.Context, id string) (*model.Avatar, []by
 	}
 
 	return avatar, data, nil
+}
+func (s *AvatarService) Delete(ctx context.Context, id, userID string) error {
+	// 1. Получаем метаданные, чтобы узнать S3Key и проверить владельца
+	avatar, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if avatar.UserID != userID {
+		return fmt.Errorf("access denied")
+	}
+
+	// 2. Мягкое удаление в БД
+	if err := s.repo.SoftDelete(ctx, id, userID); err != nil {
+		return err
+	}
+
+	// 3. Отправляем событие на физическое удаление из S3
+	event := AvatarDeleteEvent{AvatarID: id, S3Key: avatar.S3Key}
+	if err := s.deletePublisher.PublishEvent(ctx, event); err != nil {
+		log.Printf("⚠️ Failed to publish delete event: %v", err)
+	}
+
+	return nil
 }

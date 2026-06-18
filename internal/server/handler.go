@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gubaevem/gophprofile/internal/service"
 )
@@ -83,7 +84,7 @@ func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Вызываем бизнес-логику
 	avatar, data, err := h.service.Get(r.Context(), id)
 	if err != nil {
-		if err.Error() == "avatar not found" {
+		if strings.Contains(err.Error(), "avatar not found") {
 			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
 			return
 		}
@@ -97,4 +98,26 @@ func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", avatar.FileName))
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
+}
+
+// DELETE /api/v1/avatars/{id}
+func (h *AvatarHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := r.Header.Get("X-User-ID")
+	if id == "" || userID == "" {
+		http.Error(w, `{"error":"id and X-User-ID are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	err := h.service.Delete(r.Context(), id, userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "denied") {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusForbidden)
+			return
+		}
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent) // 204 No Content
 }

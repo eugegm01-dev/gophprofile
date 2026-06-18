@@ -73,3 +73,10 @@ func (c *Client) Download(ctx context.Context, key string) ([]byte, error) {
 
 	return data, nil
 }
+func (c *Client) Delete(ctx context.Context, key string) error {
+	err := c.minio.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to delete object from s3: %w", err)
+	}
+	return nil
+}

@@ -67,3 +67,14 @@ func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*model.Avata
 
 	return avatar, nil
 }
+func (r *AvatarRepository) SoftDelete(ctx context.Context, id, userID string) error {
+	query := `UPDATE avatars SET deleted_at = NOW() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	tag, err := r.db.Pool().Exec(ctx, query, id, userID)
+	if err != nil {
+		return fmt.Errorf("failed to soft delete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("avatar not found or access denied")
+	}
+	return nil
+}
