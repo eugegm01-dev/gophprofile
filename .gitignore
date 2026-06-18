@@ -33,4 +33,6 @@ dist/
 
 # Others
 .jpg
-*.jpg
+*.jpg*.jpg
+*.jpeg
+*.png
