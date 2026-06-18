@@ -7,12 +7,28 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gubaevem/gophprofile/internal/model"
-	"github.com/gubaevem/gophprofile/internal/repository"
-	"github.com/gubaevem/gophprofile/pkg/rabbitmq" // Добавили
-	pkgs3 "github.com/gubaevem/gophprofile/pkg/s3"
 )
 
-// AvatarUploadEvent - структура события для воркера
+// Интерфейсы для зависимостей (Dependency Inversion Principle)
+type AvatarRepository interface {
+	Create(ctx context.Context, avatar *model.Avatar) error
+	GetByID(ctx context.Context, id string) (*model.Avatar, error)
+	SoftDelete(ctx context.Context, id, userID string) error
+	UpdateProcessingStatus(ctx context.Context, avatarID, status string) error
+	UpdateThumbnails(ctx context.Context, avatarID string, thumbnails map[string]string) error
+}
+
+type S3Client interface {
+	Upload(ctx context.Context, key string, data []byte, contentType string) error
+	Download(ctx context.Context, key string) ([]byte, error)
+	Delete(ctx context.Context, key string) error
+}
+
+type Publisher interface {
+	PublishEvent(ctx context.Context, event any) error
+}
+
+// События
 type AvatarUploadEvent struct {
 	AvatarID string `json:"avatar_id"`
 	UserID   string `json:"user_id"`
@@ -24,14 +40,15 @@ type AvatarDeleteEvent struct {
 	S3Key    string `json:"s3_key"`
 }
 
+// Сервис теперь зависит от интерфейсов
 type AvatarService struct {
-	repo            *repository.AvatarRepository
-	s3Client        *pkgs3.Client
-	publisher       *rabbitmq.Publisher
-	deletePublisher *rabbitmq.Publisher // Добавили
+	repo            AvatarRepository
+	s3Client        S3Client
+	publisher       Publisher
+	deletePublisher Publisher
 }
 
-func NewAvatarService(repo *repository.AvatarRepository, s3 *pkgs3.Client, pub *rabbitmq.Publisher, deletePub *rabbitmq.Publisher) *AvatarService {
+func NewAvatarService(repo AvatarRepository, s3 S3Client, pub Publisher, deletePub Publisher) *AvatarService {
 	return &AvatarService{
 		repo:            repo,
 		s3Client:        s3,
@@ -40,6 +57,7 @@ func NewAvatarService(repo *repository.AvatarRepository, s3 *pkgs3.Client, pub *
 	}
 }
 
+// ... остальной код (Upload, Get, Delete, GetWithSize) остаётся без изменений
 func (s *AvatarService) Upload(ctx context.Context, userID, fileName, mimeType string, data []byte) (*model.Avatar, error) {
 	avatarID := uuid.New().String()
 	s3Key := fmt.Sprintf("avatars/%s/%s", userID, avatarID)
