@@ -60,7 +60,12 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/v1/avatars", avatarHandler.Upload)
+	mux.HandleFunc("GET /api/v1/avatars/{id}/metadata", avatarHandler.GetMetadata)
 	mux.HandleFunc("GET /api/v1/avatars/{id}", avatarHandler.Get)
+	mux.HandleFunc("GET /api/v1/users/{user_id}/avatars", avatarHandler.GetUserAvatars)
+	mux.HandleFunc("GET /web/gallery/{user_id}", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join("web", "static", "gallery.html"))
+	})
 	mux.HandleFunc("DELETE /api/v1/avatars/{id}", avatarHandler.Delete)
 
 	// Web interface

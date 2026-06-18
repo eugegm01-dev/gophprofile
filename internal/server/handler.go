@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gubaevem/gophprofile/internal/model"
 	"github.com/gubaevem/gophprofile/internal/service"
+	"github.com/gubaevem/gophprofile/pkg/validator"
 )
 
 type AvatarHandler struct {
@@ -55,8 +57,17 @@ func (h *AvatarHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Вызываем бизнес-логику
-	avatar, err := h.service.Upload(r.Context(), userID, handler.Filename, handler.Header.Get("Content-Type"), data)
+	// 4.1. Валидация через magic bytes (защита от подмены расширения)
+	if err := validator.ValidateImageByMagicBytes(data, handler.Header.Get("Content-Type")); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 4.2. Определяем реальный MIME-тип
+	realMimeType := validator.DetectMimeType(data)
+
+	// 5. Вызываем бизнес-логику (используем реальный MIME-тип)
+	avatar, err := h.service.Upload(r.Context(), userID, handler.Filename, realMimeType, data)
 	if err != nil {
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
@@ -133,4 +144,54 @@ func (h *AvatarHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent) // 204 No Content
+}
+
+// GET /api/v1/avatars/{id}/metadata
+func (h *AvatarHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, `{"error":"avatar id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	metadata, err := h.service.GetMetadata(r.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "avatar not found") {
+			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(metadata); err != nil {
+		log.Printf("Failed to encode metadata response: %v", err)
+	}
+}
+
+// GET /api/v1/users/{user_id}/avatars
+func (h *AvatarHandler) GetUserAvatars(w http.ResponseWriter, r *http.Request) {
+	userID := r.PathValue("user_id")
+	if userID == "" {
+		http.Error(w, `{"error":"user_id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	avatars, err := h.service.GetUserAvatars(r.Context(), userID)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if avatars == nil {
+		avatars = []*model.Avatar{} // пустой массив вместо null
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(avatars); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

@@ -43,6 +43,23 @@ func (m *MockAvatarRepository) UpdateThumbnails(ctx context.Context, avatarID st
 	return args.Error(0)
 }
 
+// ↓ ДОБАВЬ ЭТИ ДВА МЕТОДА:
+func (m *MockAvatarRepository) GetMetadataByID(ctx context.Context, id string) (*model.Avatar, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Avatar), args.Error(1)
+}
+
+func (m *MockAvatarRepository) GetByUserID(ctx context.Context, userID string) ([]*model.Avatar, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Avatar), args.Error(1)
+}
+
 type MockS3Client struct {
 	mock.Mock
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -92,4 +93,76 @@ func (r *AvatarRepository) UpdateThumbnails(ctx context.Context, avatarID string
 		return fmt.Errorf("failed to update thumbnails: %w", err)
 	}
 	return nil
+}
+
+func (r *AvatarRepository) GetMetadataByID(ctx context.Context, id string) (*model.Avatar, error) {
+	query := `
+		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
+		       upload_status, processing_status, thumbnail_s3_keys, created_at, updated_at
+		FROM avatars
+		WHERE id = $1 AND deleted_at IS NULL`
+
+	avatar := &model.Avatar{}
+	var thumbnailKeys []byte
+	var updatedAt sql.NullTime
+
+	err := r.db.Pool().QueryRow(ctx, query, id).Scan(
+		&avatar.ID, &avatar.UserID, &avatar.FileName, &avatar.MimeType,
+		&avatar.SizeBytes, &avatar.S3Key, &avatar.UploadStatus,
+		&avatar.ProcessingStatus, &thumbnailKeys, &avatar.CreatedAt, &updatedAt,
+	)
+
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, fmt.Errorf("avatar not found")
+		}
+		return nil, fmt.Errorf("failed to get avatar: %w", err)
+	}
+
+	if updatedAt.Valid {
+		avatar.UpdatedAt = updatedAt.Time
+	}
+
+	if len(thumbnailKeys) > 0 {
+		if err := json.Unmarshal(thumbnailKeys, &avatar.ThumbnailS3Keys); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal thumbnails: %w", err)
+		}
+	}
+
+	return avatar, nil
+}
+func (r *AvatarRepository) GetByUserID(ctx context.Context, userID string) ([]*model.Avatar, error) {
+	query := `
+		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
+		       upload_status, processing_status, thumbnail_s3_keys, created_at
+		FROM avatars
+		WHERE user_id = $1 AND deleted_at IS NULL
+		ORDER BY created_at DESC`
+
+	rows, err := r.db.Pool().Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query avatars: %w", err)
+	}
+	defer rows.Close()
+
+	var avatars []*model.Avatar
+	for rows.Next() {
+		avatar := &model.Avatar{}
+		var thumbnailKeys []byte
+		err := rows.Scan(
+			&avatar.ID, &avatar.UserID, &avatar.FileName, &avatar.MimeType,
+			&avatar.SizeBytes, &avatar.S3Key, &avatar.UploadStatus,
+			&avatar.ProcessingStatus, &thumbnailKeys, &avatar.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan avatar: %w", err)
+		}
+		if len(thumbnailKeys) > 0 {
+			_ = json.Unmarshal(thumbnailKeys, &avatar.ThumbnailS3Keys)
+		}
+		avatar.URL = fmt.Sprintf("/api/v1/avatars/%s", avatar.ID)
+		avatars = append(avatars, avatar)
+	}
+
+	return avatars, nil
 }

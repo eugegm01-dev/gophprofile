@@ -1,11 +1,11 @@
-
-
 # Binaries
 *.exe
 *.dll
 *.so
 *.dylib
 bin/
+server
+worker
 
 # Test
 *.test
@@ -23,7 +23,7 @@ coverage.html
 .env.local
 .env.*.local
 
-# OS 
+# OS
 .DS_Store
 Thumbs.db
 
@@ -31,11 +31,8 @@ Thumbs.db
 build/
 dist/
 
-# Others
-.jpg
-*.jpg*.jpg
+# Images (тестовые файлы)
+*.jpg
 *.jpeg
 *.png
-test*.jpg
-worker*.jpg
-*.jpeg
+*.gif

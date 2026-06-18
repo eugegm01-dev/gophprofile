@@ -16,6 +16,8 @@ type AvatarRepository interface {
 	SoftDelete(ctx context.Context, id, userID string) error
 	UpdateProcessingStatus(ctx context.Context, avatarID, status string) error
 	UpdateThumbnails(ctx context.Context, avatarID string, thumbnails map[string]string) error
+	GetMetadataByID(ctx context.Context, id string) (*model.Avatar, error)
+	GetByUserID(ctx context.Context, userID string) ([]*model.Avatar, error)
 }
 
 type S3Client interface {
@@ -164,4 +166,34 @@ func (s *AvatarService) GetWithSize(ctx context.Context, id, size string) (*mode
 	}
 
 	return avatar, data, nil
+}
+
+func (s *AvatarService) GetMetadata(ctx context.Context, id string) (*model.MetadataResponse, error) {
+	avatar, err := s.repo.GetMetadataByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get avatar metadata: %w", err)
+	}
+
+	// Формируем список миниатюр с URL
+	thumbnails := make([]model.ThumbnailInfo, 0, len(avatar.ThumbnailS3Keys))
+	for size := range avatar.ThumbnailS3Keys {
+		thumbnails = append(thumbnails, model.ThumbnailInfo{
+			Size: size,
+			URL:  fmt.Sprintf("/api/v1/avatars/%s?size=%s", avatar.ID, size),
+		})
+	}
+
+	return &model.MetadataResponse{
+		ID:         avatar.ID,
+		UserID:     avatar.UserID,
+		FileName:   avatar.FileName,
+		MimeType:   avatar.MimeType,
+		Size:       avatar.SizeBytes,
+		Thumbnails: thumbnails,
+		CreatedAt:  avatar.CreatedAt,
+		UpdatedAt:  avatar.UpdatedAt,
+	}, nil
+}
+func (s *AvatarService) GetUserAvatars(ctx context.Context, userID string) ([]*model.Avatar, error) {
+	return s.repo.GetByUserID(ctx, userID)
 }
