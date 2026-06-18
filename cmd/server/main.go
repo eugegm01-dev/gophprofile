@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 
 	"github.com/gubaevem/gophprofile/internal/config"
 	"github.com/gubaevem/gophprofile/internal/repository"
 	"github.com/gubaevem/gophprofile/internal/server"
 	"github.com/gubaevem/gophprofile/internal/service"
-	"github.com/gubaevem/gophprofile/pkg/rabbitmq" // Добавили
+	"github.com/gubaevem/gophprofile/pkg/rabbitmq"
 	pkgs3 "github.com/gubaevem/gophprofile/pkg/s3"
 )
 
@@ -29,29 +30,27 @@ func main() {
 	}
 
 	// Подключаем RabbitMQ
-	// Подключаем RabbitMQ (для загрузок)
 	mqPublisher, err := rabbitmq.NewPublisher(cfg.RabbitMQ.URL, cfg.RabbitMQ.Queue)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer mqPublisher.Close()
 
-	// Подключаем RabbitMQ (для удалений)
 	mqDeletePublisher, err := rabbitmq.NewPublisher(cfg.RabbitMQ.URL, cfg.RabbitMQ.QueueDelete)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ (delete): %v", err)
 	}
 	defer mqDeletePublisher.Close()
 
-	// 2. Инициализация слоев (Dependency Injection)
+	// 2. Инициализация слоев
 	avatarRepo := repository.NewAvatarRepository(db)
-	// Передаем mqPublisher в сервис
 	avatarService := service.NewAvatarService(avatarRepo, s3Client, mqPublisher, mqDeletePublisher)
 	avatarHandler := server.NewAvatarHandler(avatarService)
 
 	// 3. Роутер
 	mux := http.NewServeMux()
 
+	// API endpoints
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -64,8 +63,23 @@ func main() {
 	mux.HandleFunc("GET /api/v1/avatars/{id}", avatarHandler.Get)
 	mux.HandleFunc("DELETE /api/v1/avatars/{id}", avatarHandler.Delete)
 
+	// Web interface
+	mux.HandleFunc("GET /web/upload", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join("web", "static", "index.html"))
+	})
+
+	// Static files
+	staticDir := filepath.Join("web", "static")
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
+
+	// Root redirect to /web/upload
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/upload", http.StatusFound)
+	})
+
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("🚀 Server starting on %s", addr)
+	log.Printf("🌐 Web interface: http://localhost:%d/web/upload", cfg.Server.Port)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
