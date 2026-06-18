@@ -31,3 +31,12 @@ func (r *AvatarRepository) Create(ctx context.Context, avatar *model.Avatar) err
 	}
 	return nil
 }
+
+func (r *AvatarRepository) UpdateProcessingStatus(ctx context.Context, avatarID, status string) error {
+	query := `UPDATE avatars SET processing_status = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Pool().Exec(ctx, query, status, avatarID)
+	if err != nil {
+		return fmt.Errorf("failed to update status: %w", err)
+	}
+	return nil
+}
