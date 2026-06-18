@@ -36,3 +36,6 @@ dist/
 *.jpg*.jpg
 *.jpeg
 *.png
+test*.jpg
+worker*.jpg
+*.jpeg
