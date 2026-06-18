@@ -7,17 +7,41 @@ import (
 
 	"github.com/gubaevem/gophprofile/internal/config"
 	"github.com/gubaevem/gophprofile/internal/repository"
+	"github.com/gubaevem/gophprofile/internal/server"
+	"github.com/gubaevem/gophprofile/internal/service"
+	"github.com/gubaevem/gophprofile/pkg/rabbitmq" // Добавили
+	pkgs3 "github.com/gubaevem/gophprofile/pkg/s3"
 )
 
 func main() {
 	cfg := config.MustLoad()
 
+	// 1. Инфраструктура
 	db, err := repository.NewPostgres(&cfg.Database)
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 	defer db.Close()
 
+	s3Client, err := pkgs3.NewClient(&cfg.S3)
+	if err != nil {
+		log.Fatalf("Failed to connect to S3: %v", err)
+	}
+
+	// Подключаем RabbitMQ
+	mqPublisher, err := rabbitmq.NewPublisher(cfg.RabbitMQ.URL, cfg.RabbitMQ.Queue)
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+	}
+	defer mqPublisher.Close()
+
+	// 2. Инициализация слоев (Dependency Injection)
+	avatarRepo := repository.NewAvatarRepository(db)
+	// Передаем mqPublisher в сервис
+	avatarService := service.NewAvatarService(avatarRepo, s3Client, mqPublisher)
+	avatarHandler := server.NewAvatarHandler(avatarService)
+
+	// 3. Роутер
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -25,6 +49,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "ok", "service": "gophprofile"}`))
 	})
+
+	mux.HandleFunc("/api/v1/avatars", avatarHandler.Upload)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("🚀 Server starting on %s", addr)

@@ -30,3 +30,7 @@ Thumbs.db
 # Build
 build/
 dist/
+
+# Others
+.jpg
+*.jpg
