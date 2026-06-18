@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -64,7 +65,11 @@ func (h *AvatarHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	// 6. Возвращаем успешный JSON
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(avatar)
+	if err := json.NewEncoder(w).Encode(avatar); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+		http.Error(w, `{"error":"failed to encode response"}`, http.StatusInternalServerError)
+		return
+	}
 }
 
 // GET /api/v1/avatars/{id}
@@ -102,7 +107,10 @@ func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", avatar.FileName))
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("Failed to write response: %v", err)
+		return
+	}
 }
 
 // DELETE /api/v1/avatars/{id}

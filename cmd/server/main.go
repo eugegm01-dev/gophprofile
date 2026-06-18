@@ -55,7 +55,9 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "ok", "service": "gophprofile"}`))
+		if _, err := w.Write([]byte(`{"status": "ok", "service": "gophprofile"}`)); err != nil {
+			log.Printf("Failed to write health response: %v", err)
+		}
 	})
 
 	mux.HandleFunc("POST /api/v1/avatars", avatarHandler.Upload)

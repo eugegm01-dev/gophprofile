@@ -101,12 +101,16 @@ func (c *Consumer) Consume(ctx context.Context, handler func([]byte) error) erro
 			if err := handler(msg.Body); err != nil {
 				log.Printf("❌ Failed to process message: %v", err)
 				// NACK без requeue — сообщение уйдет в DLQ (если настроена)
-				msg.Nack(false, false)
+				if err := msg.Nack(false, false); err != nil {
+					log.Printf("Failed to nack message: %v", err)
+				}
 				continue
 			}
 
 			// Успех — подтверждаем сообщение
-			msg.Ack(false)
+			if err := msg.Ack(false); err != nil {
+				log.Printf("Failed to ack message: %v", err)
+			}
 			log.Printf("✅ Message processed and acknowledged")
 		}
 	}

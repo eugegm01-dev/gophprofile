@@ -1,6 +1,6 @@
 module github.com/gubaevem/gophprofile
 
-go 1.26.4
+go 1.25.0
 
 require (
 	github.com/disintegration/imaging v1.6.2
