@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/google/uuid"
 	"github.com/gubaevem/gophprofile/internal/model"
 )
+
+var ErrAccessDenied = errors.New("access denied")
 
 // Интерфейсы для зависимостей (Dependency Inversion Principle)
 type AvatarRepository interface {
@@ -124,7 +127,7 @@ func (s *AvatarService) Delete(ctx context.Context, id, userID string) error {
 		return err
 	}
 	if avatar.UserID != userID {
-		return fmt.Errorf("access denied")
+		return ErrAccessDenied
 	}
 
 	// 2. Мягкое удаление в БД

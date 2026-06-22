@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/gubaevem/gophprofile/internal/config"
 	"github.com/gubaevem/gophprofile/internal/repository"
@@ -50,15 +55,10 @@ func main() {
 	// 3. Роутер
 	mux := http.NewServeMux()
 
-	// API endpoints
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte(`{"status": "ok", "service": "gophprofile"}`)); err != nil {
-			log.Printf("Failed to write health response: %v", err)
-		}
-	})
+	healthHandler := server.NewHealthHandler(db, s3Client, mqPublisher)
+	mux.HandleFunc("GET /health", healthHandler.Check)
 
+	// API endpoints
 	mux.HandleFunc("POST /api/v1/avatars", avatarHandler.Upload)
 	mux.HandleFunc("GET /api/v1/avatars/{id}/metadata", avatarHandler.GetMetadata)
 	mux.HandleFunc("GET /api/v1/avatars/{id}", avatarHandler.Get)
@@ -85,7 +85,30 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("🚀 Server starting on %s", addr)
 	log.Printf("🌐 Web interface: http://localhost:%d/web/upload", cfg.Server.Port)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatal(err)
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: mux,
 	}
+
+	// Запускаем сервер в горутине
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Ждём сигнал завершения
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server shutdown error: %v", err)
+	}
+	log.Println("Server stopped gracefully")
 }

@@ -80,3 +80,12 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// Публичные методы для health-check
+func (c *Client) Minio() *minio.Client {
+	return c.minio
+}
+
+func (c *Client) BucketName() string {
+	return c.bucket
+}

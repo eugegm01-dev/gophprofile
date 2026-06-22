@@ -90,3 +90,6 @@ func (p *Publisher) PublishEvent(ctx context.Context, event any) error {
 
 	return nil
 }
+func (p *Publisher) IsClosed() bool {
+	return p.conn.IsClosed()
+}

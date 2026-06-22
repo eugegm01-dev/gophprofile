@@ -4,10 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/gubaevem/gophprofile/internal/model"
+	"github.com/jackc/pgx/v5"
 )
+
+var ErrNotFound = errors.New("avatar not found")
 
 type AvatarRepository struct {
 	db *Postgres
@@ -59,8 +63,8 @@ func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*model.Avata
 	)
 
 	if err != nil {
-		if err.Error() == "no rows in result set" {
-			return nil, fmt.Errorf("avatar not found")
+		if errors.Is(err, pgx.ErrNoRows) || err.Error() == "no rows in result set" {
+			return nil, ErrNotFound // возвращаем свою ошибку
 		}
 		return nil, fmt.Errorf("failed to get avatar: %w", err)
 	}
@@ -113,8 +117,8 @@ func (r *AvatarRepository) GetMetadataByID(ctx context.Context, id string) (*mod
 	)
 
 	if err != nil {
-		if err.Error() == "no rows in result set" {
-			return nil, fmt.Errorf("avatar not found")
+		if errors.Is(err, pgx.ErrNoRows) || err.Error() == "no rows in result set" {
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get avatar: %w", err)
 	}

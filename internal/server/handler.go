@@ -1,20 +1,75 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"strings"
+	"time"
 
 	"github.com/gubaevem/gophprofile/internal/model"
+	"github.com/gubaevem/gophprofile/internal/repository"
 	"github.com/gubaevem/gophprofile/internal/service"
+	"github.com/gubaevem/gophprofile/pkg/rabbitmq"
+	"github.com/gubaevem/gophprofile/pkg/s3"
 	"github.com/gubaevem/gophprofile/pkg/validator"
 )
 
 type AvatarHandler struct {
 	service *service.AvatarService
+}
+
+type HealthHandler struct {
+	db     *repository.Postgres
+	s3     *s3.Client
+	rabbit *rabbitmq.Publisher
+}
+
+func NewHealthHandler(db *repository.Postgres, s3 *s3.Client, rabbit *rabbitmq.Publisher) *HealthHandler {
+	return &HealthHandler{db: db, s3: s3, rabbit: rabbit}
+}
+
+func (h *HealthHandler) Check(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	status := map[string]string{
+		"status":   "ok",
+		"postgres": "ok",
+		"s3":       "ok",
+		"rabbitmq": "ok",
+	}
+	httpCode := http.StatusOK
+
+	// Проверяем PostgreSQL
+	if err := h.db.Pool().Ping(ctx); err != nil {
+		status["postgres"] = "error: " + err.Error()
+		status["status"] = "degraded"
+		httpCode = http.StatusServiceUnavailable
+	}
+
+	// Проверяем S3
+	if _, err := h.s3.Minio().BucketExists(ctx, h.s3.BucketName()); err != nil {
+		status["s3"] = "error: " + err.Error()
+		status["status"] = "degraded"
+		httpCode = http.StatusServiceUnavailable
+	}
+
+	// Проверяем RabbitMQ
+	if h.rabbit == nil || h.rabbit.IsClosed() {
+		status["rabbitmq"] = "error: connection closed"
+		status["status"] = "degraded"
+		httpCode = http.StatusServiceUnavailable
+	} // Или просто проверяем что connection открыт
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpCode)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Failed to encode health status: %v", err)
+	}
 }
 
 func NewAvatarHandler(service *service.AvatarService) *AvatarHandler {
@@ -69,7 +124,8 @@ func (h *AvatarHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	// 5. Вызываем бизнес-логику (используем реальный MIME-тип)
 	avatar, err := h.service.Upload(r.Context(), userID, handler.Filename, realMimeType, data)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		log.Printf("Internal error: %v", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -96,21 +152,16 @@ func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Читаем query-параметр size
 	size := r.URL.Query().Get("size")
 
-	// Вызываем бизнес-логику
 	avatar, data, err := h.service.GetWithSize(r.Context(), id, size)
 	if err != nil {
-		if strings.Contains(err.Error(), "avatar not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
 			return
 		}
-		if strings.Contains(err.Error(), "not available") {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
-			return
-		}
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		log.Printf("get avatar error: %v", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -120,7 +171,6 @@ func (h *AvatarHandler) Get(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(data); err != nil {
 		log.Printf("Failed to write response: %v", err)
-		return
 	}
 }
 
@@ -135,11 +185,15 @@ func (h *AvatarHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	err := h.service.Delete(r.Context(), id, userID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "denied") {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusForbidden)
-			return
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
+		case errors.Is(err, service.ErrAccessDenied):
+			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+		default:
+			log.Printf("Delete error: %v", err)
+			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		}
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -156,11 +210,15 @@ func (h *AvatarHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 
 	metadata, err := h.service.GetMetadata(r.Context(), id)
 	if err != nil {
-		if strings.Contains(err.Error(), "avatar not found") {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
 			http.Error(w, `{"error":"avatar not found"}`, http.StatusNotFound)
-			return
+		case errors.Is(err, service.ErrAccessDenied):
+			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+		default:
+			log.Printf("GetMetadata error: %v", err)
+			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		}
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -181,7 +239,8 @@ func (h *AvatarHandler) GetUserAvatars(w http.ResponseWriter, r *http.Request) {
 
 	avatars, err := h.service.GetUserAvatars(r.Context(), userID)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		log.Printf("Internal error: %v", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 

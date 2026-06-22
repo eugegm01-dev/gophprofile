@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -51,15 +52,19 @@ func main() {
 
 	avatarRepo := repository.NewAvatarRepository(db)
 
-	// Handler для загрузок — с реальным ресайзом!
+	// Создаём отменяемый контекст для всех операций
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Обработчик загрузок — теперь использует переданный ctx
 	uploadHandler := func(body []byte) error {
 		var event service.AvatarUploadEvent
 		if err := json.Unmarshal(body, &event); err != nil {
 			return err
 		}
 
-		// Проверяем статус перед обработкой (идемпотентность из ТЗ 2.2!)
-		avatar, err := avatarRepo.GetByID(context.Background(), event.AvatarID)
+		// Проверяем статус (идемпотентность)
+		avatar, err := avatarRepo.GetByID(ctx, event.AvatarID)
 		if err != nil {
 			return err
 		}
@@ -70,62 +75,82 @@ func main() {
 
 		log.Printf("🖼️ Processing avatar %s for user %s", event.AvatarID, event.UserID)
 
-		// Retry с exponential backoff
 		maxRetries := 3
 		backoff := time.Second
+		var lastErr error
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
-			err = processAvatarUpload(context.Background(), s3Client, avatarRepo, event)
+			// Передаём ctx в обработку, чтобы можно было прервать
+			err := processAvatarUpload(ctx, s3Client, avatarRepo, event)
 			if err == nil {
 				log.Printf("✅ Avatar %s processed successfully", event.AvatarID)
 				return nil
 			}
-
+			lastErr = err
 			log.Printf("⚠️ Attempt %d/%d failed: %v", attempt, maxRetries, err)
-			if attempt < maxRetries {
-				log.Printf("⏳ Retrying in %v...", backoff)
-				time.Sleep(backoff)
-				backoff *= 2 // exponential backoff: 1s → 2s → 4s
-			}
-		}
 
-		return fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
+			if attempt == maxRetries {
+				break
+			}
+
+			log.Printf("⏳ Retrying in %v...", backoff)
+			select {
+			case <-time.After(backoff):
+				// продолжаем
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			backoff *= 2
+		}
+		return fmt.Errorf("failed after %d attempts: %w", maxRetries, lastErr)
 	}
 
-	// Handler для удалений
+	// Обработчик удалений
 	deleteHandler := func(body []byte) error {
 		var event service.AvatarDeleteEvent
 		if err := json.Unmarshal(body, &event); err != nil {
 			return err
 		}
 		log.Printf("🗑️ Deleting avatar %s from S3", event.AvatarID)
-		return s3Client.Delete(context.Background(), event.S3Key)
+		return s3Client.Delete(ctx, event.S3Key) // используем ctx
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// Запускаем консьюмеров с WaitGroup для graceful shutdown
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	go func() {
+		defer wg.Done()
 		if err := uploadConsumer.Consume(ctx, uploadHandler); err != nil {
 			log.Printf("Upload consumer error: %v", err)
 		}
 	}()
+
 	go func() {
+		defer wg.Done()
 		if err := deleteConsumer.Consume(ctx, deleteHandler); err != nil {
 			log.Printf("Delete consumer error: %v", err)
 		}
 	}()
 
 	log.Println("🚀 Worker starting (listening on 2 queues)...")
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
+
+	log.Println("🛑 Received shutdown signal, stopping consumers...")
+	cancel() // останавливаем все операции
+
+	log.Println("Waiting for consumers to stop...")
+	wg.Wait()
+
 	log.Println("👋 Worker stopped gracefully")
 }
 
-// processAvatarUpload вынесена на верхний уровень (в Go нельзя объявлять функции внутри функций)
+// processAvatarUpload теперь принимает context.Context
 func processAvatarUpload(ctx context.Context, s3Client *pkgs3.Client, avatarRepo *repository.AvatarRepository, event service.AvatarUploadEvent) error {
+	// Скачиваем оригинал
 	originalData, err := s3Client.Download(ctx, event.S3Key)
 	if err != nil {
 		return err
@@ -152,10 +177,12 @@ func processAvatarUpload(ctx context.Context, s3Client *pkgs3.Client, avatarRepo
 			return err
 		}
 
-		thumbKey := strings.TrimSuffix(event.S3Key, ".jpg") + "_" + s.name + ".jpg"
+		// Формируем ключ для миниатюры (безопасно)
+		baseKey := strings.TrimSuffix(event.S3Key, ".jpg")
 		if format != "jpeg" {
-			thumbKey = strings.TrimSuffix(event.S3Key, ".jpg") + "_" + s.name + "." + format
+			baseKey = strings.TrimSuffix(event.S3Key, "."+format)
 		}
+		thumbKey := baseKey + "_" + s.name + "." + format
 
 		if err := s3Client.Upload(ctx, thumbKey, buf.Bytes(), "image/"+format); err != nil {
 			return err
@@ -167,7 +194,7 @@ func processAvatarUpload(ctx context.Context, s3Client *pkgs3.Client, avatarRepo
 	return avatarRepo.UpdateThumbnails(ctx, event.AvatarID, thumbnails)
 }
 
-// decodeImage декодирует изображение из байтов
+// decodeImage и encodeImage остаются без изменений
 func decodeImage(data []byte) (image.Image, string, error) {
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -176,7 +203,6 @@ func decodeImage(data []byte) (image.Image, string, error) {
 	return img, format, nil
 }
 
-// encodeImage кодирует изображение в буфер
 func encodeImage(buf *bytes.Buffer, img image.Image, format string) error {
 	switch format {
 	case "jpeg":
