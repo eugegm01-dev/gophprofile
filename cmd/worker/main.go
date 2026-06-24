@@ -9,7 +9,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"log"
-	"os"
 	"os/signal"
 	"strings"
 	"sync"
@@ -135,9 +134,9 @@ func main() {
 
 	log.Println("🚀 Worker starting (listening on 2 queues)...")
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
 
 	log.Println("🛑 Received shutdown signal, stopping consumers...")
 	cancel() // останавливаем все операции
