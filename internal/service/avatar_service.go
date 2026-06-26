@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gubaevem/gophprofile/internal/model"
+	kafkapkg "github.com/gubaevem/gophprofile/pkg/kafka"
 )
 
 var ErrAccessDenied = errors.New("access denied")
@@ -33,7 +35,7 @@ type Publisher interface {
 	PublishEvent(ctx context.Context, event any) error
 }
 
-// События
+// События для RabbitMQ (для воркера)
 type AvatarUploadEvent struct {
 	AvatarID string `json:"avatar_id"`
 	UserID   string `json:"user_id"`
@@ -45,24 +47,31 @@ type AvatarDeleteEvent struct {
 	S3Key    string `json:"s3_key"`
 }
 
-// Сервис теперь зависит от интерфейсов
+// Сервис с гибридной архитектурой: RabbitMQ + Kafka
 type AvatarService struct {
 	repo            AvatarRepository
 	s3Client        S3Client
-	publisher       Publisher
-	deletePublisher Publisher
+	publisher       Publisher          // RabbitMQ для воркера
+	deletePublisher Publisher          // RabbitMQ для воркера (удаление)
+	kafkaProducer   *kafkapkg.Producer // Kafka для аналитики/аудита
 }
 
-func NewAvatarService(repo AvatarRepository, s3 S3Client, pub Publisher, deletePub Publisher) *AvatarService {
+func NewAvatarService(
+	repo AvatarRepository,
+	s3 S3Client,
+	pub Publisher,
+	deletePub Publisher,
+	kafkaProd *kafkapkg.Producer,
+) *AvatarService {
 	return &AvatarService{
 		repo:            repo,
 		s3Client:        s3,
 		publisher:       pub,
 		deletePublisher: deletePub,
+		kafkaProducer:   kafkaProd,
 	}
 }
 
-// ... остальной код (Upload, Get, Delete, GetWithSize) остаётся без изменений
 func (s *AvatarService) Upload(ctx context.Context, userID, fileName, mimeType string, data []byte) (*model.Avatar, error) {
 	avatarID := uuid.New().String()
 	s3Key := fmt.Sprintf("avatars/%s/%s", userID, avatarID)
@@ -90,29 +99,41 @@ func (s *AvatarService) Upload(ctx context.Context, userID, fileName, mimeType s
 		return nil, fmt.Errorf("failed to save metadata: %w", err)
 	}
 
-	// 4. Отправляем событие в RabbitMQ для воркера
+	// 4. Отправляем событие в RabbitMQ для воркера (ресайз)
 	event := AvatarUploadEvent{
 		AvatarID: avatarID,
 		UserID:   userID,
 		S3Key:    s3Key,
 	}
-
 	if err := s.publisher.PublishEvent(ctx, event); err != nil {
-		// В идеале здесь нужен паттерн Transactional Outbox,
-		// но для MVP мы просто логируем ошибку, чтобы не фейлить весь запрос
 		log.Printf("⚠️ Failed to publish event to RabbitMQ: %v", err)
+	}
+
+	// 5. Публикуем событие в Kafka для аналитики/аудита
+	if s.kafkaProducer != nil {
+		kafkaEvent := map[string]any{
+			"event_type": "avatar_uploaded",
+			"avatar_id":  avatarID,
+			"user_id":    userID,
+			"file_name":  fileName,
+			"mime_type":  mimeType,
+			"size_bytes": int64(len(data)),
+			"timestamp":  time.Now().UTC(),
+		}
+		if err := s.kafkaProducer.PublishEvent(ctx, kafkaEvent); err != nil {
+			log.Printf("Warning: failed to publish to Kafka: %v", err)
+		}
 	}
 
 	return avatar, nil
 }
+
 func (s *AvatarService) Get(ctx context.Context, id string) (*model.Avatar, []byte, error) {
-	// 1. Получаем метаданные из БД
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get avatar metadata: %w", err)
 	}
 
-	// 2. Скачиваем файл из S3
 	data, err := s.s3Client.Download(ctx, avatar.S3Key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to download from s3: %w", err)
@@ -120,6 +141,7 @@ func (s *AvatarService) Get(ctx context.Context, id string) (*model.Avatar, []by
 
 	return avatar, data, nil
 }
+
 func (s *AvatarService) Delete(ctx context.Context, id, userID string) error {
 	// 1. Получаем метаданные, чтобы узнать S3Key и проверить владельца
 	avatar, err := s.repo.GetByID(ctx, id)
@@ -135,26 +157,36 @@ func (s *AvatarService) Delete(ctx context.Context, id, userID string) error {
 		return err
 	}
 
-	// 3. Отправляем событие на физическое удаление из S3
+	// 3. Отправляем событие на физическое удаление из S3 (RabbitMQ)
 	event := AvatarDeleteEvent{AvatarID: id, S3Key: avatar.S3Key}
 	if err := s.deletePublisher.PublishEvent(ctx, event); err != nil {
 		log.Printf("⚠️ Failed to publish delete event: %v", err)
 	}
 
+	// 4. Публикуем событие удаления в Kafka для аналитики/аудита
+	if s.kafkaProducer != nil {
+		kafkaEvent := map[string]any{
+			"event_type": "avatar_deleted",
+			"avatar_id":  id,
+			"user_id":    userID,
+			"timestamp":  time.Now().UTC(),
+		}
+		if err := s.kafkaProducer.PublishEvent(ctx, kafkaEvent); err != nil {
+			log.Printf("Warning: failed to publish delete event to Kafka: %v", err)
+		}
+	}
+
 	return nil
 }
+
 func (s *AvatarService) GetWithSize(ctx context.Context, id, size string) (*model.Avatar, []byte, error) {
-	// 1. Получаем метаданные из БД
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get avatar metadata: %w", err)
 	}
 
-	// 2. Определяем, какой файл скачивать
 	s3Key := avatar.S3Key // по умолчанию оригинал
-
 	if size != "" && size != "original" {
-		// Проверяем, есть ли миниатюра нужного размера
 		if thumbKey, ok := avatar.ThumbnailS3Keys[size]; ok {
 			s3Key = thumbKey
 		} else {
@@ -162,7 +194,6 @@ func (s *AvatarService) GetWithSize(ctx context.Context, id, size string) (*mode
 		}
 	}
 
-	// 3. Скачиваем файл из S3
 	data, err := s.s3Client.Download(ctx, s3Key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to download from s3: %w", err)
@@ -177,7 +208,6 @@ func (s *AvatarService) GetMetadata(ctx context.Context, id string) (*model.Meta
 		return nil, fmt.Errorf("failed to get avatar metadata: %w", err)
 	}
 
-	// Формируем список миниатюр с URL
 	thumbnails := make([]model.ThumbnailInfo, 0, len(avatar.ThumbnailS3Keys))
 	for size := range avatar.ThumbnailS3Keys {
 		thumbnails = append(thumbnails, model.ThumbnailInfo{
@@ -197,6 +227,7 @@ func (s *AvatarService) GetMetadata(ctx context.Context, id string) (*model.Meta
 		UpdatedAt:  avatar.UpdatedAt,
 	}, nil
 }
+
 func (s *AvatarService) GetUserAvatars(ctx context.Context, userID string) ([]*model.Avatar, error) {
 	return s.repo.GetByUserID(ctx, userID)
 }

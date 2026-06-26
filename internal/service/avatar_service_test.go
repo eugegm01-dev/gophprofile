@@ -43,7 +43,6 @@ func (m *MockAvatarRepository) UpdateThumbnails(ctx context.Context, avatarID st
 	return args.Error(0)
 }
 
-// ↓ ДОБАВЬ ЭТИ ДВА МЕТОДА:
 func (m *MockAvatarRepository) GetMetadataByID(ctx context.Context, id string) (*model.Avatar, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
@@ -94,21 +93,17 @@ func TestAvatarService_Upload_Success(t *testing.T) {
 	mockS3 := new(MockS3Client)
 	mockPublisher := new(MockPublisher)
 	mockDeletePublisher := new(MockPublisher)
+	// 5-й аргумент nil — Kafka producer не нужен в unit-тестах
+	svc := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher, nil)
 
-	service := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher)
-
-	// Настраиваем моки
 	mockS3.On("Upload", mock.Anything, mock.MatchedBy(func(key string) bool {
 		return len(key) > 0
 	}), mock.Anything, "image/jpeg").Return(nil)
-
 	mockRepo.On("Create", mock.Anything, mock.AnythingOfType("*model.Avatar")).Return(nil)
 	mockPublisher.On("PublishEvent", mock.Anything, mock.AnythingOfType("service.AvatarUploadEvent")).Return(nil)
 
-	// Вызываем метод
-	avatar, err := service.Upload(context.Background(), "user-123", "test.jpg", "image/jpeg", []byte("fake image data"))
+	avatar, err := svc.Upload(context.Background(), "user-123", "test.jpg", "image/jpeg", []byte("fake image data"))
 
-	// Проверяем результат
 	assert.NoError(t, err)
 	assert.NotNil(t, avatar)
 	assert.Equal(t, "user-123", avatar.UserID)
@@ -118,7 +113,6 @@ func TestAvatarService_Upload_Success(t *testing.T) {
 	assert.Equal(t, "uploaded", avatar.UploadStatus)
 	assert.Equal(t, "pending", avatar.ProcessingStatus)
 
-	// Проверяем, что моки были вызваны
 	mockS3.AssertExpectations(t)
 	mockRepo.AssertExpectations(t)
 	mockPublisher.AssertExpectations(t)
@@ -129,34 +123,26 @@ func TestAvatarService_Upload_S3Error(t *testing.T) {
 	mockS3 := new(MockS3Client)
 	mockPublisher := new(MockPublisher)
 	mockDeletePublisher := new(MockPublisher)
+	svc := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher, nil)
 
-	service := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher)
-
-	// S3 возвращает ошибку
 	mockS3.On("Upload", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("S3 error"))
 
-	// Вызываем метод
-	avatar, err := service.Upload(context.Background(), "user-123", "test.jpg", "image/jpeg", []byte("data"))
+	avatar, err := svc.Upload(context.Background(), "user-123", "test.jpg", "image/jpeg", []byte("data"))
 
-	// Проверяем, что вернулась ошибка
 	assert.Error(t, err)
 	assert.Nil(t, avatar)
 	assert.Contains(t, err.Error(), "failed to upload to s3")
-
 	mockS3.AssertExpectations(t)
 	mockRepo.AssertNotCalled(t, "Create")
 }
 
-// Тесты для Get
 func TestAvatarService_Get_Success(t *testing.T) {
 	mockRepo := new(MockAvatarRepository)
 	mockS3 := new(MockS3Client)
 	mockPublisher := new(MockPublisher)
 	mockDeletePublisher := new(MockPublisher)
+	svc := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher, nil)
 
-	service := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher)
-
-	// Настраиваем моки
 	expectedAvatar := &model.Avatar{
 		ID:    "test-id",
 		S3Key: "avatars/user-123/test-id",
@@ -164,28 +150,22 @@ func TestAvatarService_Get_Success(t *testing.T) {
 	mockRepo.On("GetByID", mock.Anything, "test-id").Return(expectedAvatar, nil)
 	mockS3.On("Download", mock.Anything, "avatars/user-123/test-id").Return([]byte("image data"), nil)
 
-	// Вызываем метод
-	avatar, data, err := service.Get(context.Background(), "test-id")
+	avatar, data, err := svc.Get(context.Background(), "test-id")
 
-	// Проверяем результат
 	assert.NoError(t, err)
 	assert.NotNil(t, avatar)
 	assert.Equal(t, []byte("image data"), data)
-
 	mockRepo.AssertExpectations(t)
 	mockS3.AssertExpectations(t)
 }
 
-// Тесты для Delete
 func TestAvatarService_Delete_Success(t *testing.T) {
 	mockRepo := new(MockAvatarRepository)
 	mockS3 := new(MockS3Client)
 	mockPublisher := new(MockPublisher)
 	mockDeletePublisher := new(MockPublisher)
+	svc := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher, nil)
 
-	service := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher)
-
-	// Настраиваем моки
 	expectedAvatar := &model.Avatar{
 		ID:     "test-id",
 		UserID: "user-123",
@@ -195,12 +175,9 @@ func TestAvatarService_Delete_Success(t *testing.T) {
 	mockRepo.On("SoftDelete", mock.Anything, "test-id", "user-123").Return(nil)
 	mockDeletePublisher.On("PublishEvent", mock.Anything, mock.AnythingOfType("service.AvatarDeleteEvent")).Return(nil)
 
-	// Вызываем метод
-	err := service.Delete(context.Background(), "test-id", "user-123")
+	err := svc.Delete(context.Background(), "test-id", "user-123")
 
-	// Проверяем результат
 	assert.NoError(t, err)
-
 	mockRepo.AssertExpectations(t)
 	mockDeletePublisher.AssertExpectations(t)
 }
@@ -210,24 +187,19 @@ func TestAvatarService_Delete_AccessDenied(t *testing.T) {
 	mockS3 := new(MockS3Client)
 	mockPublisher := new(MockPublisher)
 	mockDeletePublisher := new(MockPublisher)
+	svc := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher, nil)
 
-	service := NewAvatarService(mockRepo, mockS3, mockPublisher, mockDeletePublisher)
-
-	// Настраиваем моки — другой пользователь
 	expectedAvatar := &model.Avatar{
 		ID:     "test-id",
-		UserID: "user-456", // Другой пользователь!
+		UserID: "user-456",
 		S3Key:  "avatars/user-456/test-id",
 	}
 	mockRepo.On("GetByID", mock.Anything, "test-id").Return(expectedAvatar, nil)
 
-	// Вызываем метод
-	err := service.Delete(context.Background(), "test-id", "user-123")
+	err := svc.Delete(context.Background(), "test-id", "user-123")
 
-	// Проверяем, что вернулась ошибка доступа
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "access denied")
-
 	mockRepo.AssertExpectations(t)
 	mockRepo.AssertNotCalled(t, "SoftDelete")
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	Database DatabaseConfig
 	S3       S3Config
 	RabbitMQ RabbitMQConfig
+	Kafka    KafkaConfig
 }
 
 type ServerConfig struct {
@@ -44,6 +46,11 @@ type RabbitMQConfig struct {
 	QueueDelete string
 }
 
+type KafkaConfig struct {
+	Brokers      []string
+	AvatarEvents string
+}
+
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
@@ -65,6 +72,9 @@ func Load() (*Config, error) {
 	rabbitHost := getEnv("RABBITMQ_HOST", "localhost")
 	rabbitPort := getEnv("RABBITMQ_PORT", "5672")
 	rabbitURL := fmt.Sprintf("amqp://%s:%s@%s:%s/", rabbitUser, rabbitPass, rabbitHost, rabbitPort)
+	// Kafka
+	kafkaBrokers := getEnv("KAFKA_BROKERS", "localhost:9092")
+	brokers := strings.Split(kafkaBrokers, ",")
 
 	cfg := &Config{
 		Server: ServerConfig{
@@ -90,6 +100,10 @@ func Load() (*Config, error) {
 			URL:         rabbitURL,
 			Queue:       getEnv("RABBITMQ_QUEUE", "avatar_processing"),
 			QueueDelete: getEnv("RABBITMQ_QUEUE_DELETE", "avatar_deletion"),
+		},
+		Kafka: KafkaConfig{
+			Brokers:      brokers,
+			AvatarEvents: getEnv("KAFKA_TOPIC_AVATAR_EVENTS", "avatar-events"),
 		},
 	}
 

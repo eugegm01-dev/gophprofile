@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"github.com/gubaevem/gophprofile/internal/repository"
 	"github.com/gubaevem/gophprofile/internal/server"
 	"github.com/gubaevem/gophprofile/internal/service"
+	kafkapkg "github.com/gubaevem/gophprofile/pkg/kafka"
 	"github.com/gubaevem/gophprofile/pkg/rabbitmq"
 	pkgs3 "github.com/gubaevem/gophprofile/pkg/s3"
 )
@@ -33,7 +35,7 @@ func main() {
 		log.Fatalf("Failed to connect to S3: %v", err)
 	}
 
-	// Подключаем RabbitMQ
+	// Подключаем RabbitMQ (для воркера)
 	mqPublisher, err := rabbitmq.NewPublisher(cfg.RabbitMQ.URL, cfg.RabbitMQ.Queue)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
@@ -46,14 +48,31 @@ func main() {
 	}
 	defer mqDeletePublisher.Close()
 
-	// 2. Инициализация слоев
+	// Создаем Kafka producer (для аналитики/аудита)
+	var kafkaProducer *kafkapkg.Producer
+	if len(cfg.Kafka.Brokers) > 0 {
+		kafkaProducer, err = kafkapkg.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AvatarEvents)
+		if err != nil {
+			log.Printf("Warning: failed to create Kafka producer: %v", err)
+		} else {
+			defer kafkaProducer.Close()
+			log.Println("✅ Kafka producer initialized")
+		}
+	}
+
+	// 2. Инициализация слоев (передаем ВСЕ 5 зависимостей)
 	avatarRepo := repository.NewAvatarRepository(db)
-	avatarService := service.NewAvatarService(avatarRepo, s3Client, mqPublisher, mqDeletePublisher)
+	avatarService := service.NewAvatarService(
+		avatarRepo,
+		s3Client,
+		mqPublisher,
+		mqDeletePublisher,
+		kafkaProducer, // может быть nil, сервис это обрабатывает
+	)
 	avatarHandler := server.NewAvatarHandler(avatarService)
 
 	// 3. Роутер
 	mux := http.NewServeMux()
-
 	healthHandler := server.NewHealthHandler(db, s3Client, mqPublisher)
 	mux.HandleFunc("GET /health", healthHandler.Check)
 
@@ -98,9 +117,10 @@ func main() {
 	}()
 
 	// Ждём сигнал завершения
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
 	log.Println("Shutting down server...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
