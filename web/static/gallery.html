@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Avatar Gallery</title>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+    <div class="container mx-auto max-w-6xl">
+        <h1 class="text-4xl font-bold text-white mb-8">Avatar Gallery</h1>
+        
+        <div class="mb-6 flex gap-4">
+            <input type="text" id="userIdInput" placeholder="Enter User ID" value="user-123"
+                class="px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50">
+            <button onclick="loadGallery()" 
+                class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                Load Gallery
+            </button>
+        </div>
+
+        <div id="gallery" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
+        <div id="emptyState" class="hidden text-center text-white/60 py-12">
+            No avatars found for this user
+        </div>
+    </div>
+
+    <script>
+        async function loadGallery() {
+            const userId = document.getElementById('userIdInput').value;
+            const gallery = document.getElementById('gallery');
+            const emptyState = document.getElementById('emptyState');
+            
+            gallery.innerHTML = '';
+            emptyState.classList.add('hidden');
+
+            try {
+                const response = await fetch(`/api/v1/users/${userId}/avatars`);
+                const avatars = await response.json();
+
+                if (!avatars || avatars.length === 0) {
+                    emptyState.classList.remove('hidden');
+                    return;
+                }
+
+                avatars.forEach(avatar => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-white/10 backdrop-blur rounded-xl p-4 border border-white/20';
+                    card.innerHTML = `
+                        <img src="/api/v1/avatars/${avatar.id}?size=300x300" 
+                             alt="${avatar.file_name}"
+                             class="w-full h-48 object-cover rounded-lg mb-3"
+                             onerror="this.src='/api/v1/avatars/${avatar.id}'">
+                        <p class="text-white text-sm truncate">${avatar.file_name}</p>
+                        <p class="text-white/60 text-xs">${(avatar.size_bytes / 1024).toFixed(1)} KB</p>
+                        <p class="text-white/40 text-xs mt-1">${avatar.processing_status}</p>
+                        <button onclick="deleteAvatar('${avatar.id}', '${userId}')"
+                            class="mt-2 w-full px-3 py-1 bg-red-600/80 text-white text-sm rounded hover:bg-red-700">
+                            Delete
+                        </button>
+                    `;
+                    gallery.appendChild(card);
+                });
+            } catch (err) {
+                alert('Error loading gallery: ' + err.message);
+            }
+        }
+
+        async function deleteAvatar(id, userId) {
+            if (!confirm('Delete this avatar?')) return;
+            
+            try {
+                await fetch(`/api/v1/avatars/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'X-User-ID': userId }
+                });
+                loadGallery();
+            } catch (err) {
+                alert('Error deleting: ' + err.message);
+            }
+        }
+
+        // Загружаем галерею при старте
+        loadGallery();
+    </script>
+</body>
+</html>
