@@ -36,3 +36,8 @@ dist/
 *.jpeg
 *.png
 *.gif
+
+# Monitoring data
+prometheus_data/
+loki_data/
+grafana_data/
