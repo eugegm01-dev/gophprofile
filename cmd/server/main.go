@@ -27,7 +27,11 @@ func main() {
 
 	// === OBSERVABILITY: Инициализация OpenTelemetry ===
 	// Jaeger OTLP gRPC endpoint (проброшен в docker-compose на 4317)
-	shutdownOTEL, metricsHandler, err := observability.InitOTEL("gophprofile-server", "localhost:4317")
+	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if otlpEndpoint == "" {
+		otlpEndpoint = "jaeger:4317" // Дефолт для работы внутри docker-сети
+	}
+	shutdownOTEL, metricsHandler, err := observability.InitOTEL("gophprofile-server", otlpEndpoint)
 	if err != nil {
 		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)
 	}

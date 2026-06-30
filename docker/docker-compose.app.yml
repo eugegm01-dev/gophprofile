@@ -9,19 +9,14 @@ services:
       - ../.env
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432  
       - S3_ENDPOINT=minio:9000
       - RABBITMQ_HOST=rabbitmq
       - KAFKA_BROKERS=kafka:9092
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     ports:
       - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+    
     labels:
       - "logging=promtail"
     networks:
@@ -37,13 +32,10 @@ services:
       - ../.env
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
       - S3_ENDPOINT=minio:9000
       - RABBITMQ_HOST=rabbitmq
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+    
     labels:
       - "logging=promtail"
     networks:

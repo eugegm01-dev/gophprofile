@@ -1,18 +1,16 @@
-.PHONY: help dev build test lint clean run-server run-worker
+.PHONY: help dev dev-infra stop build test lint clean run-server run-worker tidy webhook
 
 help: ## Показать справку
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 dev: ## Запустить всю среду (инфра + приложения)
-	docker compose -f docker/docker-compose.yml up -d
-	docker compose -f docker/docker-compose.app.yml up -d --build
+	docker compose -f docker/docker-compose.yml -f docker/docker-compose.app.yml up -d --build
 
 dev-infra: ## Запустить только инфраструктуру
 	docker compose -f docker/docker-compose.yml up -d
 
 stop: ## Остановить всё
-	docker compose -f docker/docker-compose.app.yml down
-	docker compose -f docker/docker-compose.yml down
+	docker compose -f docker/docker-compose.yml -f docker/docker-compose.app.yml down
 
 build: ## Собрать бинарники
 	go build -o bin/server ./cmd/server
@@ -28,10 +26,10 @@ lint: ## Запустить линтер
 clean: ## Очистить
 	rm -rf bin/ coverage.out coverage.html
 
-run-server: ## Запустить сервер
+run-server: ## Запустить сервер локально
 	go run ./cmd/server
 
-run-worker: ## Запустить worker
+run-worker: ## Запустить worker локально
 	go run ./cmd/worker
 
 tidy: ## Очистить зависимости
