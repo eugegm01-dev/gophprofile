@@ -1,0 +1,22 @@
+groups:
+- name: gophprofile-alerts
+  rules:
+  # Алерт на высокий процент ошибок (больше 10% за 2 минуты)
+  - alert: HighErrorRate
+    expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[2m])) / sum(rate(http_server_request_duration_seconds_count[2m])) > 0.1
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High HTTP error rate on GophProfile"
+      description: "Error rate is above 10% for more than 1 minute."
+
+  # Алерт на медленную загрузку аватарок (p95 > 2 сек)
+  - alert: HighUploadLatency
+    expr: histogram_quantile(0.95, sum(rate(avatars_upload_duration_seconds_bucket[5m])) by (le)) > 2
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High avatar upload latency"
+      description: "p95 upload duration is above 2 seconds."

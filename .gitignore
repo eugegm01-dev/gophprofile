@@ -1,11 +1,11 @@
-
-
 # Binaries
 *.exe
 *.dll
 *.so
 *.dylib
 bin/
+server
+worker
 
 # Test
 *.test
@@ -23,10 +23,21 @@ coverage.html
 .env.local
 .env.*.local
 
-# OS 
+# OS
 .DS_Store
 Thumbs.db
 
 # Build
 build/
 dist/
+
+# Images (тестовые файлы)
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Monitoring data
+prometheus_data/
+loki_data/
+grafana_data/
