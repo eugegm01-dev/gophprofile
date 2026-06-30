@@ -3,8 +3,16 @@
 help: ## Показать справку
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-dev: ## Запустить dev окружение
+dev: ## Запустить всю среду (инфра + приложения)
 	docker compose -f docker/docker-compose.yml up -d
+	docker compose -f docker/docker-compose.app.yml up -d --build
+
+dev-infra: ## Запустить только инфраструктуру
+	docker compose -f docker/docker-compose.yml up -d
+
+stop: ## Остановить всё
+	docker compose -f docker/docker-compose.app.yml down
+	docker compose -f docker/docker-compose.yml down
 
 build: ## Собрать бинарники
 	go build -o bin/server ./cmd/server
@@ -29,3 +37,6 @@ run-worker: ## Запустить worker
 tidy: ## Очистить зависимости
 	go mod tidy
 	go mod verify
+
+webhook: ## Запустить webhook для приёма алертов
+	go run scripts/alert_webhook.go

@@ -3,7 +3,7 @@ groups:
   rules:
   # Алерт на высокий процент ошибок (больше 10% за 2 минуты)
   - alert: HighErrorRate
-    expr: sum(rate(http_server_request_duration_seconds_count{job="gophprofile-server", http_response_status_code=~"5.."}[2m])) / sum(rate(http_server_request_duration_seconds_count{job="gophprofile-server"}[2m])) > 0.1
+    expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[2m])) / sum(rate(http_server_request_duration_seconds_count[2m])) > 0.1
     for: 1m
     labels:
       severity: critical
@@ -13,7 +13,7 @@ groups:
 
   # Алерт на медленную загрузку аватарок (p95 > 2 сек)
   - alert: HighUploadLatency
-    expr: histogram_quantile(0.95, sum(rate(avatars_upload_duration_seconds_bucket{job="gophprofile-server"}[5m])) by (le)) > 2
+    expr: histogram_quantile(0.95, sum(rate(avatars_upload_duration_seconds_bucket[5m])) by (le)) > 2
     for: 2m
     labels:
       severity: warning

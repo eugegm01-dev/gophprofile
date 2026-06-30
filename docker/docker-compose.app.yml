@@ -1,0 +1,54 @@
+services:
+  gophprofile-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: gophprofile-server
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - S3_ENDPOINT=minio:9000
+      - RABBITMQ_HOST=rabbitmq
+      - KAFKA_BROKERS=kafka:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    labels:
+      - "logging=promtail"
+    networks:
+      - gophprofile-net
+
+  gophprofile-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: gophprofile-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - S3_ENDPOINT=minio:9000
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    labels:
+      - "logging=promtail"
+    networks:
+      - gophprofile-net
+
+networks:
+  gophprofile-net:
+    driver: bridge

@@ -16,6 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - gophprofile-net
 
   minio:
     image: minio/minio:RELEASE.2025-06-13T11-33-47Z
@@ -35,6 +37,8 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    networks:
+      - gophprofile-net
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -53,6 +57,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      - gophprofile-net
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -81,6 +87,8 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+    networks:
+      - gophprofile-net
 
   prometheus:
     image: prom/prometheus:v2.51.0
@@ -99,6 +107,8 @@ services:
       - "9090:9090"
     extra_hosts:
       - "host.docker.internal:host-gateway" # Чтобы Prometheus видел локально запущенный Go-сервер
+    networks:
+      - gophprofile-net
 
   jaeger:
     image: jaegertracing/all-in-one:1.56
@@ -110,6 +120,8 @@ services:
       - "16686:16686" # Jaeger UI
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
+    networks:
+      - gophprofile-net
 
   loki:
     image: grafana/loki:2.9.6
@@ -120,6 +132,8 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki_data:/loki
+    networks:
+      - gophprofile-net
 
   promtail:
     image: grafana/promtail:2.9.6
@@ -132,6 +146,8 @@ services:
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
+    networks:
+      - gophprofile-net
 
   grafana:
     image: grafana/grafana:10.4.2
@@ -149,6 +165,8 @@ services:
       - prometheus
       - loki
       - jaeger
+    networks:
+      - gophprofile-net
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -162,6 +180,8 @@ services:
       - "9093:9093"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - gophprofile-net
 
 volumes:
   postgres_data:
@@ -171,3 +191,7 @@ volumes:
   prometheus_data:
   loki_data:
   grafana_data:
+
+  networks:
+  gophprofile-net:
+    driver: bridge
